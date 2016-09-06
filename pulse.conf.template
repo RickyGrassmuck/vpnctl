@@ -1,0 +1,25 @@
+# Username used to login to Pulse Secure
+user=<user@domain.com>
+
+# Specify a default realm to login to (Ex. Dev, QA, Support,Sysadmin etc.) 
+authgroup=<realm>
+
+# Location of pid-file
+pid-file=/home/<user>/.openconnect/oc.pid
+
+# Setting to send proccess to background after connecting
+background
+
+# Less Output
+quiet 
+
+# DO NOT REMOVE! Must be specified for Pulse Secure Connections
+juniper 
+
+############Script Variables ##############
+####### Must remain commented out #########
+
+# cookie-filename=webvpn-cookie
+# **NOTE: do not put http(s):// at the beginning of the URL
+# vpn-url=subdomain.domain.tld/vpn
+

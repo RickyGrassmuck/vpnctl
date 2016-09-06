@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+
+################################################################
+## Package Name: vpnctl
+## Author: Ricky Grassmuck
+## Contact: rigrassm@gmail.com
+## Version: 0.0.1
+## License: MIT
+## Description: Wrapper utility for managing openconnects
+## pulse secure VPN capabilities. Supports 2FA as well as suspending 
+## and resuming sessions through the use of session cookies.
+################################################################
+
+
+## Script must be run as root
+if [ "$EUID" -ne 0 ]
+    then echo "Please run as root";
+    exit 1;
+fi
+
+function parse_conf(){
+    grep -i ${1} ${CONFIG} | awk -F '=' '{print $2}'
+}
+
+##########################################
+##  Set DATA_DIR variable to location you
+##  wish to store the programs data
+##########################################
+DATA_DIR="/home/rigrassm/.openconnect"
+##########################################
+
+##########################################
+## Static Variables - editing may break script
+##########################################
+CONFIG="${DATA_DIR}/pulse.conf";
+URL="$(parse_conf vpn-url)";
+COOKIE_FILE="${DATA_DIR}/$(parse_conf cookie-filename)";
+PID_FILE=$(parse_conf pid-file);
+OPTION=${1};
+STATUS=0;
+INT_TEST='^[0-9]+$'
+##########################################
+
+function test() {
+    if [[ ! -d ${DATA_DIR} ]]; then 
+	mkdir -p ${DATA_DIR};
+    fi
+
+    if [[ ! -f ${CONFIG} ]]; then
+	echo <<STOP 
+	Error: No configuration file found!
+	Copy the template pulse.conf.template to ${DATA_DIR} and edit the configuration options 
+STOP
+	exit 1;
+    fi
+
+    if [[ -z $(which openconnect) ]]; then
+	echo "Error: openconnect executable not found on path" 
+	exit 1;
+    fi
+}
+
+##########################################
+## Begin Script
+##########################################
+
+test;
+
+## Function used to determine if openconnect is running by checking
+##   if the PID is in use. PID is obtained from either the $PID_FILE
+##   or by passing the -p or --pid args with the PID as the 
+##   arguments value.
+function testpid() {
+
+    [[ -z $(kill -s 0 ${1}) ]] && STATUS=1 || STATUS=0;
+    return;
+}
+
+function checkpid() {
+    if [[ -n $PID_NUM ]]; then
+        testpid $PID_NUM;
+	return;
+    elif [[ -f ${PID_FILE} ]]; then
+        TEST_NUM=$(cat $PID_FILE);
+	testpid $TEST_NUM;
+        [[ ${STATUS} -eq 0 ]] && clrtmpfiles || PID_NUM=${TEST_NUM}
+	return; 
+    else
+	TEST_NUM=$(pgrep openconnect);
+	[[ -n $TESTNUM ]] && testpid ${TEST_NUM};
+	if [[ ${STATUS} -eq 1 ]]; then
+	    PID_NUM=${TEST_NUM};
+	fi
+    fi
+
+    return; 
+}
+
+## Function used to delete the cookie and pid files so they aren't 
+## orphaned.
+function clrtmpfiles() {
+    if [[ -f ${COOKIE_FILE} ]]; then 
+    
+        echo "Removing Cookie file ${COOKIE_FILE}";
+        /bin/rm -f ${COOKIE_FILE};
+        echo "Cookie file removed";
+    
+    fi
+
+    if [[ -f ${PID_FILE} ]]; then
+        
+        echo "Removing PID file ${PID_FILE}";
+        /bin/rm -f "${PID_FILE}";
+        echo "PID file removed"
+    
+    fi
+		
+    return;
+}
+
+## Funtion that is responsible for authenticating the user and generating
+##		a web cookie to use for establishing a connection. This is the key 
+##    to being able to suspend and reconnect without having to
+##    reauthenticate. NOTE: There is likely a TTL on the cookie, unsure 
+##    of how long it is valid.
+function authenticate() {
+    if [[ -f ${CONFIG} ]]; then
+
+        eval `openconnect --config=${CONFIG} --authenticate ${URL}`;
+	[[ -n $COOKIE ]] && echo $COOKIE > ${COOKIE_FILE};
+	
+    else
+
+        printf "#########################################\n\n"
+        echo "#### Error: No configuration file provided";
+        printf "\n#########################################\n\n"
+        exit 1;
+	
+    fi
+	return;
+}
+
+## As it says, responsible for making the VPN connection. Checks for the
+##   web cookie and requests a new on if one is not available.
+function vpnconnect() {
+	checkpid;
+	if [ ${STATUS} -eq 1 ]; then
+	
+        printf "\n#########################################\n\n"
+		echo "## Error: Openconnect is already running with PID ${PID_NUM}";
+		printf "\n#########################################\n\n"
+		echo "Exiting...";
+		exit 1;
+    
+	fi
+
+	## Calling the authenticate function to generate a web cookie
+	if [ ! -f ${COOKIE_FILE} ]; then	
+	
+	    printf "\n#########################################\n\n"
+	    echo "#### Session Cookie Not Found, Reauthenticating...";
+	    printf "\n#########################################\n\n"
+	    authenticate;				
+	
+	fi
+
+	printf "\n#########################################\n\n"
+	echo "#### Connecting to ${URL}";
+	printf "\n#########################################\n\n"
+
+	## Open connection using the web cookie for authentication.
+	openconnect \
+		--config=${CONFIG} \
+		--cookie="$(cat $COOKIE_FILE)" \
+			${URL};
+	printf "\n#########################################\n\n"
+	printf "#########################################\n\n"
+
+	## Make sure VPN is up and running
+	## TODO: Create function to test against network info rather than just 
+	##			 checking for the PID.
+	checkpid;
+	if [[ ${STATUS} -eq 1 ]]; then
+	
+        echo "Openconnect running with PID ${PID_NUM}";
+		printf "\n#########################################\n\n"
+        printf "#########################################\n\n"
+        echo "VPN Connected";
+        printf "\n#########################################\n\n"
+        exit 0;
+
+	fi
+
+    exit 0;
+
+}
+
+## Function that suspends your VPN session. To log back in the user will
+##   just run vpnctl -c and it will use the web cookie to resume 
+##   the session.
+function vpnsuspend() {
+    checkpid;
+    if [ ${STATUS} -eq 1 ]; then
+	
+	echo "suspending vpn connection";
+	kill -1 ${PID_NUM};
+	echo "done";
+	exit 0;
+	
+    else
+	
+	echo "Openconnect is not running";
+	echo "Process is either not runnig or PID file was deleted"
+	exit 1;
+	
+    fi
+}
+
+## Cleanly disconnects the client making sure to destroy the session
+##   deleting the web cookie and PID file along with bringing the 
+##   network configuration back to it's state before the session 
+##   was initiated
+function vpndisconnect() {
+    checkpid;
+    if [ ${STATUS} -eq 1 ]; then
+    
+	echo "disconnecting vpn connection";
+	kill -2 ${PID_NUM};
+	echo "Connection closed, clearing cookie"
+	/bin/rm -f ${COOKIE_FILE};
+	echo "done";
+	exit 0;
+	
+    else
+	
+	echo "Unable to find oc.pid file";
+	echo "Process is either not runnig or PID file was deleted"
+	exit 1;
+	
+    fi
+}
+
+## Not for use when the session is suspended. This function will 
+##   force disconnect(if still connected) and quicky reconnect 
+##   your session. Useful when switching networks(ie. eth > Wifi)
+function vpnreconnect {
+    checkpid;
+    if [ ${STATUS} -eq 1 ]; then
+	
+	echo "Force Reconnect";
+	kill -12 ${PID_NUM};
+	echo "done";
+	exit 0;
+	
+    else
+	
+	echo "Unable to find oc.pid file";
+	exit 1;
+	
+    fi
+}
+
+## Force kills the vpn connection without managing the session. Should
+##    only be used when the connection is stalled and unresponsive
+##    to traditional methods of shutting the connection down
+function vpnkill {
+    checkpid;
+    if [[ ${STATUS} -eq 1 ]]; then
+    
+	echo "force killing vpn connection";
+	kill -12 ${PID_NUM};
+	## Making sure we don't end up with a stale cookie or rogue PID file.
+	clrtmpfiles;
+	echo "done";
+	exit 0;
+    
+    else
+	
+        echo "Unable to find oc.pid file";
+	echo "Process may still be running, run ps faux | grep vpnctl to obtain the PID"
+	echo "Run vpnctl --kill <PID> to manually kill process";
+	exit 1;
+	
+    fi
+}
+
+## Parse Command Line arguments
+##
+case $OPTION in
+    -c|--connect)
+        vpnconnect;
+        shift;
+        ;;
+    -d|--disconnect)
+        vpndisconnect;
+        shift;
+        ;;
+    -k|--kill)    
+        shift;
+        ## Check if -p/--pid argument is used
+        if [[ ${OPTION} == '-p' ]] || [[ ${OPTION} == '--pid' ]]; then
+            shift;
+            if [[ ${OPTION} =~ $INT_TEST ]]; then
+                PID_NUM=${OPTION};
+            else
+                echo "Invalid argument for PID Number";
+                echo "Attempting to obtain PID from file";
+            fi
+        fi
+        vpnkill;
+	;;
+    -r|--reconnect)
+        vpnreconnect;
+        shift;
+        ;;
+    -s|--suspend)
+        vpnsuspend;
+        shift;
+        ;;
+    -p|--pid)
+        shift;
+        PID_NUM=${OPTION};
+        shift;
+        ;;
+    --default)
+	vpnconnect;
+	shift;
+	;;
+    *)
+	echo "Unknown option ${1}";
+	exit 1;
+	;;
+esac;
+
+exit 0;
