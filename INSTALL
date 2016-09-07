@@ -1,0 +1,109 @@
+################################################################
+## Package Name: vpnctl
+## Author: Ricky Grassmuck
+## Contact: rigrassm@gmail.com
+## Version: 0.0.1
+## License: MIT
+## Description: Wrapper utility for managing openconnects
+## pulse secure VPN capabilities. Supports 2FA as well as suspending 
+## and resuming sessions through the use of session cookies.
+##
+##  vpnctl/INSTALL - Installation instructions
+##
+##
+################################################################
+
+## Requirements
+-- bash
+-- openconnect >= v7.05
+
+## Installation
+  
+  1) Install the requirements above if not already 
+  2) Open the vpnctl script in a text editor and change the path
+     of the DATA_DIR variable to wherever you would like to store
+     the applications config, cookie and PID files. Save the change
+  3) Create the directory you chose for step 2 if it doesn't already
+     exist.
+  4) copy the file pulse.conf.template to your DATA_DIR and name it
+     pulse.conf
+  5) Copy the vpnctl file to a directory in the root users path
+     (Ex. /usr/local/sbin, /usr/sbin)
+
+#### Configuration
+
+Brief overview of the basic options available. See man openconnect for
+exhastive list.
+
+## The options in this section are configuration options for the openconnect
+## application 
+
+# Username used to login to Pulse Secure
+user=<user@domain.com>
+
+# Specify a default realm to login to (Ex. Dev, QA, Support,Sysadmin etc.) 
+authgroup=<realm>
+
+# Location of pid-file
+pid-file=/home/<user>/.openconnect/oc.pid
+
+# Setting to send proccess to background after connecting
+background
+
+# Less Output
+quiet 
+
+# DO NOT REMOVE! Must be specified for Pulse Secure Connections
+juniper 
+
+
+## The variables below can be modified but they must remain commented out as
+## these are not openconnect variables but rather are used by the script 
+## itself.
+
+############Script Variables ##############
+####### Must remain commented out #########
+
+# cookie-filename=webvpn-cookie
+# **NOTE: do not put http(s):// at the beginning of the URL
+# vpn-url=subdomain.domain.tld/vpn
+
+
+#### Usage
+
+# Create/resume a VPN connection session
+   sudo vpnctl -c
+     or
+   sudo vpnctl --connect
+
+# Close connection(Clean close)
+  
+   sudo vpnctl -d
+     or
+   sudo vpnctl --disconnect
+
+# Suspend connection
+# Note: Session can be resumed w/o authenticating within a short 
+# period of time by running the connect command
+
+   sudo vpnctl -s
+     or
+   sudo vpnctl --suspend
+
+# Force Reconnect
+# Quickly stops and restarts the session
+
+   sudo vpnctl -r
+     or
+   sudo vpnctl --reconnect
+
+# Force kill Session(Dirty close)
+# Note: This option does not perform any actions other than killing the
+        connection, netoworking interfaces are not returned to their normal
+        state. Takes an optional argument -p or --pid in case the PID file
+        is missing.
+
+   sudo vpnctl -k [[-p|--pid] <PID>]
+     or
+   sudo vpnctl --kill [[-p|--pid] <PID>]
+
